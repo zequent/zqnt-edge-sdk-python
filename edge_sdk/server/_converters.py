@@ -464,7 +464,7 @@ def _parse_task_type(raw) -> TaskType | None:
             return None
     s = str(raw)
     prefix = "TASK_TYPE_"
-    name = s[len(prefix):] if s.startswith(prefix) else s
+    name = s[len(prefix) :] if s.startswith(prefix) else s
     try:
         return TaskType[name]
     except KeyError:

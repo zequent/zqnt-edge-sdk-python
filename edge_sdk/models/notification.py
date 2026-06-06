@@ -24,7 +24,7 @@ class TaskEvent:
     task_type: TaskType
     status: TaskStatus
     progress: float | None = None  # 0.0 – 1.0, present when RUNNING
-    message: str | None = None     # error details when ERROR
+    message: str | None = None  # error details when ERROR
     external_task_type: str | None = None
 
 

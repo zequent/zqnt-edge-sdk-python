@@ -52,11 +52,11 @@ class DetectionPublisher:
     _BACKOFF_MAX = 60.0
 
     def __init__(
-            self,
-            host: str,
-            port: int = 50052,
-            sn: str = "",
-            queue_max_size: int = 1000,
+        self,
+        host: str,
+        port: int = 50052,
+        sn: str = "",
+        queue_max_size: int = 1000,
     ) -> None:
         self._host = host
         self._port = port
@@ -125,7 +125,6 @@ class DetectionPublisher:
     async def _run_stream(self) -> None:
         import grpc
         import grpc.aio
-
         from zqnt_utils.generated.zqnt import live_data_pb2_grpc
 
         backoff = self._BACKOFF_INITIAL
@@ -202,7 +201,6 @@ class DetectionPublisher:
 
     def _base(self):
         from google.protobuf import timestamp_pb2
-
         from zqnt_utils.generated.zqnt import common_pb2
 
         ts = timestamp_pb2.Timestamp()

@@ -38,11 +38,12 @@ import dataclasses
 import logging
 import os
 import sys
-from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, AsyncGenerator
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .adapter.base import EdgeAdapter
+    from .client.connector_client import ConnectorClient
+    from .client.telemetry_publisher import TelemetryPublisher
 
 logger = logging.getLogger(__name__)
 
@@ -127,8 +128,8 @@ class EdgeAdapterRuntime:
         Create an :class:`~edge_sdk.EdgeServer`, wire in the optional
         :class:`~edge_sdk.RegistrationConfig`, and block until termination.
         """
-        from .server.edge_server import EdgeServer, RegistrationConfig
         from .models.common import AssetType, AssetVendor
+        from .server.edge_server import EdgeServer, RegistrationConfig
 
         cfg = self._config
         registration: RegistrationConfig | None = None
