@@ -63,6 +63,7 @@ class AssetType(IntEnum):
     JAMMER = 6
     CYBER_ATTACK = 7
     SAPIENT = 8
+    RNS = 9
 
 
 class AssetVendor(IntEnum):
@@ -73,6 +74,7 @@ class AssetVendor(IntEnum):
     RTMP_RTSP = 4
     SAPIENT = 5
     BETAFLIGHT = 6
+    RNS = 7
 
 
 class AssetConnection(IntEnum):
