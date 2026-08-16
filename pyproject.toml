@@ -7,7 +7,7 @@ dependencies = [
     "grpcio>=1.60.0",
     "protobuf>=4.25.0",
     "grpcio-health-checking>=1.60.0",
-    "zqnt-utils>=1.2.0",
+    "zqnt-utils>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -45,5 +45,5 @@ build-backend = "hatchling.build"
 packages = ["edge_sdk"]
 
 [tool.uv.sources]
-#zqnt-utils = { path = "../../../utils/zqnt-utils-python", editable = true }
-zqnt-utils = { git = "https://github.com/Zequent/zqnt-utils-python", rev = "v1.2.3" }
+zqnt-utils = { path = "../../../utils/zqnt-utils-python", editable = true }
+#zqnt-utils = { git = "https://github.com/zequent/zqnt-utils-python", rev = "v2.0.0" }
