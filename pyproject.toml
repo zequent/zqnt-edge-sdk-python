@@ -1,13 +1,13 @@
 [project]
 name = "edge-python-sdk"
-version = "1.3.0"
-description = "Python SDK for implementing ZQNT Edge Adapters — pinned to the 1.3.0 wire contract"
+version = "1.2.3"
+description = "Python SDK for implementing ZQNT Edge Adapters"
 requires-python = ">=3.12"
 dependencies = [
     "grpcio>=1.60.0",
     "protobuf>=4.25.0",
     "grpcio-health-checking>=1.60.0",
-    "zqnt-utils>=1.3.0,<2.0.0",
+    "zqnt-utils>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -45,8 +45,19 @@ build-backend = "hatchling.build"
 packages = ["edge_sdk"]
 
 [tool.uv.sources]
-# This branch is the Python counterpart of zqnt-utils-golang's feature/v1.3.0-proto: pinned to
-# the 1.3.0 wire contract specifically, not the current (2.0.0) line -- see
-# utils/zqnt-utils-python's own v1.3.0 tag and zqnt-protos' README "Versioning" section.
-zqnt-utils = { git = "https://github.com/zequent/zqnt-utils-python", tag = "v1.3.0" }
+# main must stay externally consumable: any adapter that git-fetches this repo (required for
+# Docker/CI builds, where a local-editable path can't resolve outside the monorepo checkout)
+# needs edge-python-sdk's OWN dependency sources to resolve too -- uv does not let a downstream
+# project's [tool.uv.sources] override reach into a git-fetched dependency's own nested source
+# declaration, confirmed by trying it and watching it fail.
+#
+# zqnt-utils-python's own main is now the 1.3.0 line (matching the Java repos' convention: main
+# == their v1.3.0 tag) -- its 2.0.0-track content (AssetVendor.ZQNT, Theatre/Event Trigger, the
+# CommandExecutionEvent notification shape this repo's own code actually needs) lives on
+# refactoring/refactoring-ecosystem-v2 instead. zqnt-utils-python's real v2.0.0 tag is also stale
+# regardless (predates that branch). Float on the branch until a fresh 2.0.0-track tag is cut.
+zqnt-utils = { git = "https://github.com/zequent/zqnt-utils-python", branch = "refactoring/refactoring-ecosystem-v2" }
+# Swap to this for day-to-day monorepo development (offline-friendly, picks up sibling edits
+# immediately, no push-then-pull round trip) -- but keep it local-only; don't commit it back to
+# main, or every downstream adapter's CI breaks again the same way this fix closes.
 #zqnt-utils = { path = "../../../utils/zqnt-utils-python", editable = true }

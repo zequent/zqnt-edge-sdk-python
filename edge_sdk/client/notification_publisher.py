@@ -1,10 +1,6 @@
 """
-NotificationPublisher – sends asset-status, mission, and task notifications to the ZQNT
-LiveDataService using the ``ProduceNotification`` client-streaming RPC.
-
-This branch tracks the 1.3.0 wire contract: ``TaskEvent`` (retired on main/2.0.0 in favor of
-the vendor-neutral ``CommandExecutionEvent``, which doesn't exist in events.proto until after
-the 1.3.0 tag).
+NotificationPublisher – sends asset-status, mission, and command-execution notifications
+to the ZQNT LiveDataService using the ``ProduceNotification`` client-streaming RPC.
 
 The publisher keeps a long-lived gRPC stream open and feeds it from an
 internal bounded queue.  If the connection drops it reconnects automatically
@@ -17,8 +13,8 @@ silently dropped when the buffer is full::
 
     await publisher.publish_asset_status(AssetStatusEvent(sn="DOCK001", online=True))
     await publisher.publish_mission_event(MissionEvent(mission_id="m1", mission_type=MissionType.STANDARD, status=MissionStatus.ACTIVE))
-    await publisher.publish_task_event(
-        TaskEvent(task_id="t1", task_type=TaskType.WAYPOINT, status=TaskStatus.RUNNING)
+    await publisher.publish_command_execution_event(
+        CommandExecutionEvent(external_execution_id="exec-1", command_id="dock.open_cover", status=CommandExecutionStatus.SUCCEEDED)
     )
 
     await publisher.close()
@@ -28,7 +24,7 @@ import asyncio
 import logging
 import uuid
 
-from ..models.notification import AssetStatusEvent, MissionEvent, TaskEvent
+from ..models.notification import AssetStatusEvent, CommandExecutionEvent, MissionEvent
 
 logger = logging.getLogger(__name__)
 
@@ -130,15 +126,15 @@ class NotificationPublisher:
         except asyncio.QueueFull:
             logger.debug("Notification queue full, dropping mission event (sn=%s)", self._sn)
 
-    async def publish_task_event(self, event: TaskEvent) -> None:
-        """Enqueue a task event. Drops the event if the buffer is full."""
+    async def publish_command_execution_event(self, event: CommandExecutionEvent) -> None:
+        """Enqueue a command-execution event. Drops the event if the buffer is full."""
         if self._queue is None:
             raise RuntimeError("Not connected. Call connect() first.")
-        req = self._build_task_event_request(event)
+        req = self._build_command_execution_event_request(event)
         try:
             self._queue.put_nowait(req)
         except asyncio.QueueFull:
-            logger.debug("Notification queue full, dropping task event (sn=%s)", self._sn)
+            logger.debug("Notification queue full, dropping command-execution event (sn=%s)", self._sn)
 
     # ------------------------------------------------------------------
     # Internal – reconnect loop
@@ -263,29 +259,41 @@ class NotificationPublisher:
             event_type=events_pb2.NotificationEventType.NOTIFICATION_EVENT_MISSION,
         )
 
-    def _build_task_event_request(self, event: TaskEvent):
+    def _build_command_execution_event_request(self, event: CommandExecutionEvent):
+        from google.protobuf import timestamp_pb2
         from zqnt_utils.generated.zqnt import events_pb2
 
+        # occurred_at is not optional on the wire, whatever this dataclass's default suggests:
+        # CommandExecutionEventPublisher rejects the event outright without it, and because
+        # LiveData publishes fire-and-forget the adapter still sees a successful call. A skill
+        # node waiting on this execution id then sits on RUNNING until it times out.
+        occurred_at = timestamp_pb2.Timestamp()
+        if event.occurred_at is not None:
+            occurred_at.FromDatetime(event.occurred_at)
+        else:
+            occurred_at.GetCurrentTime()
+
         kwargs: dict = {
-            "task_id": event.task_id,
-            "task_type": int(event.task_type),
+            "external_execution_id": event.external_execution_id,
             "status": int(event.status),
+            "asset_sn": event.sn,
+            "occurred_at": occurred_at,
         }
+        if event.command_id is not None:
+            kwargs["command_id"] = event.command_id
         if event.progress is not None:
             kwargs["progress"] = event.progress
         if event.message is not None:
             kwargs["message"] = event.message
-        if event.external_task_type is not None:
-            kwargs["external_task_type"] = event.external_task_type
 
         severity = (
             events_pb2.NotificationSeverity.NOTIFICATION_SEVERITY_CRITICAL
-            if event.status == 4  # TaskStatus.ERROR
+            if event.status == 4  # CommandExecutionStatus.FAILED
             else events_pb2.NotificationSeverity.NOTIFICATION_SEVERITY_INFO
         )
         return events_pb2.ProduceNotificationRequest(
             base=self._base(sn=event.sn or None),
-            event=events_pb2.NotificationEvent(task=events_pb2.TaskEvent(**kwargs)),
+            event=events_pb2.NotificationEvent(command_execution=events_pb2.CommandExecutionEvent(**kwargs)),
             severity=severity,
-            event_type=events_pb2.NotificationEventType.NOTIFICATION_EVENT_TASK,
+            event_type=events_pb2.NotificationEventType.NOTIFICATION_EVENT_COMMAND_EXECUTION,
         )
