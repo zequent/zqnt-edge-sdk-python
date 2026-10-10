@@ -35,6 +35,7 @@ from zqnt_utils.generated.zqnt import common_pb2, edge_pb2, edge_pb2_grpc
 
 from ..adapter.base import EdgeAdapter
 from ..auth import EdgeAuthConfig, PlatformAuthServerInterceptor
+from ..client.edge_gateway import EdgeGatewayClient
 from ..models.common import (
     AssetAirConditionerState,
     AssetType,
@@ -46,6 +47,7 @@ from ..models.common import (
     proto_enum_lookup,
     proto_enum_name,
 )
+from . import edge_server_v3
 from ._converters import (
     capabilities_to_proto,
     custom_command_response_to_proto,
@@ -62,6 +64,7 @@ from ._converters import (
     proto_to_request_context,
     proto_to_return_to_home,
 )
+from .capability_reporter import CapabilityReporter
 
 
 @dataclasses.dataclass
@@ -457,7 +460,7 @@ class _EdgeAdapterServicer(edge_pb2_grpc.EdgeAdapterServiceServicer):
         ctx = proto_to_request_context(request.base)
         cmd = proto_to_custom_command(request)
         try:
-            result = await self._adapter.send_custom_command(ctx, cmd)
+            result = await self._adapter.execute_command(ctx, cmd)
             return custom_command_response_to_proto(result, edge_pb2, timestamp_pb2, empty_pb2, common_pb2)
         except Exception as exc:
             logger.exception("Adapter error in SendCustomCommand [tid=%s sn=%s]", ctx.tid, ctx.sn)
@@ -505,6 +508,9 @@ class EdgeServer:
         auth:          Who may call this server (see :mod:`edge_sdk.auth`). Default: from the
                        environment — the platform's public key, or the dev-only disable switch.
                        Without either, every command is refused.
+        gateway:       Optional :class:`~edge_sdk.client.edge_gateway.EdgeGatewayClient`
+                       (remote-control). With it the adapter's capabilities are reported on start
+                       and whenever they change (:meth:`EdgeAdapter.reported_asset_sns`).
 
     Example::
 
@@ -528,8 +534,10 @@ class EdgeServer:
         host: str = "[::]",
         registration: RegistrationConfig | None = None,
         auth: EdgeAuthConfig | None = None,
+        gateway: EdgeGatewayClient | None = None,
     ) -> None:
         self._adapter = adapter
+        self._reporter = CapabilityReporter(adapter, gateway) if gateway is not None else None
         self._auth = auth if auth is not None else EdgeAuthConfig.from_env()
         self._port = port
         self._host = host
@@ -542,8 +550,10 @@ class EdgeServer:
         # Only the platform may command the device: every call must carry its service token.
         self._server = grpc.aio.server(interceptors=[PlatformAuthServerInterceptor(self._auth)])
 
-        # Register EdgeAdapterService
+        # Register EdgeAdapterService: v2 (typed RPCs, frozen) and v3 (ExecuteCommand only) side by
+        # side on one port, both served from the same adapter and its registered commands.
         edge_pb2_grpc.add_EdgeAdapterServiceServicer_to_server(_EdgeAdapterServicer(self._adapter), self._server)
+        edge_server_v3.add_to_server(self._adapter, self._server)
 
         # Register standard gRPC health check (used by k8s probes)
         try:
@@ -553,6 +563,7 @@ class EdgeServer:
             health_pb2_grpc.add_HealthServicer_to_server(self._health_servicer, self._server)
             self._health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
             self._health_servicer.set("EdgeAdapterService", health_pb2.HealthCheckResponse.SERVING)
+            self._health_servicer.set("zqnt.edge.v3.EdgeAdapterService", health_pb2.HealthCheckResponse.SERVING)
             logger.debug("gRPC health check service registered")
         except ImportError:
             logger.warning(
@@ -567,6 +578,8 @@ class EdgeServer:
 
         if self._registration:
             await self._register(online=True)
+        if self._reporter is not None:
+            await self._reporter.start()
         try:
             await self._server.wait_for_termination()
         except (asyncio.CancelledError, KeyboardInterrupt):
@@ -574,6 +587,8 @@ class EdgeServer:
 
     async def stop(self, grace: float = 5.0) -> None:
         """Gracefully stop the server."""
+        if self._reporter is not None:
+            await self._reporter.stop()
         if self._registration:
             await self._register(online=False)
 
