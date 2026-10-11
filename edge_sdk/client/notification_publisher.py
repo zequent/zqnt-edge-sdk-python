@@ -18,14 +18,20 @@ silently dropped when the buffer is full::
     )
 
     await publisher.close()
+
+Command events go to the platform over v3 ``EdgeGatewayService.PublishCommandEvent`` when a
+gateway is configured (``gateway=`` or ``REMOTE_CONTROL_HOST``/``REMOTE_CONTROL_PORT``), under the
+platform's command_execution_id for the run. A core without v3 gets them over v2 as before.
 """
 
 import asyncio
 import logging
+import os
 import uuid
 
 from ..auth import default_edge_token, platform_channel
 from ..models.notification import AssetStatusEvent, CommandExecutionEvent, MissionEvent
+from .edge_gateway import EdgeGatewayClient
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +63,18 @@ class NotificationPublisher:
         sn: str = "",
         queue_max_size: int = 1000,
         token: str | None = None,
+        gateway: EdgeGatewayClient | None = None,
     ) -> None:
         self._host = host
         self._token = token if token is not None else default_edge_token()
+        self._owns_gateway = gateway is None and bool(os.getenv("REMOTE_CONTROL_HOST"))
+        if self._owns_gateway:
+            gateway = EdgeGatewayClient(
+                host=os.environ["REMOTE_CONTROL_HOST"],
+                port=int(os.getenv("REMOTE_CONTROL_PORT", "8002")),
+                token=self._token,
+            )
+        self._gateway = gateway
         self._port = port
         self._sn = sn
         self._queue_max_size = queue_max_size
@@ -76,7 +91,7 @@ class NotificationPublisher:
     async def connect(self) -> None:
         """Open the channel and start the background streaming / reconnect task."""
         import grpc.aio  # noqa: F401 – verify availability
-        from zqnt_utils.generated.zqnt import live_data_pb2_grpc  # noqa: F401
+        from zqnt_api.generated.zqnt import live_data_pb2_grpc  # noqa: F401
 
         self._closed = False
         self._stop_event = asyncio.Event()
@@ -103,6 +118,8 @@ class NotificationPublisher:
                     await self._stream_task
                 except asyncio.CancelledError:
                     pass
+        if self._owns_gateway and self._gateway is not None:
+            await self._gateway.close()
         logger.info("NotificationPublisher closed (sn=%s)", self._sn)
 
     # ------------------------------------------------------------------
@@ -130,9 +147,23 @@ class NotificationPublisher:
             logger.debug("Notification queue full, dropping mission event (sn=%s)", self._sn)
 
     async def publish_command_execution_event(self, event: CommandExecutionEvent) -> None:
-        """Enqueue a command-execution event. Drops the event if the buffer is full."""
+        """
+        Send a command-execution event: v3 when the platform serves it, otherwise enqueue it for v2
+        (dropped if the buffer is full). ``occurred_at`` defaults to now on both paths.
+        """
         if self._queue is None:
             raise RuntimeError("Not connected. Call connect() first.")
+        if self._gateway is not None:
+            try:
+                if await self._gateway.publish_command_event(event):
+                    return
+            except Exception as exc:
+                logger.warning(
+                    "v3 command event for %s failed (%s: %s); sending it over v2",
+                    event.external_execution_id,
+                    type(exc).__name__,
+                    exc,
+                )
         req = self._build_command_execution_event_request(event)
         try:
             self._queue.put_nowait(req)
@@ -144,7 +175,7 @@ class NotificationPublisher:
     # ------------------------------------------------------------------
 
     async def _run_stream(self) -> None:
-        from zqnt_utils.generated.zqnt import live_data_pb2_grpc
+        from zqnt_api.generated.zqnt import live_data_pb2_grpc
 
         backoff = self._BACKOFF_INITIAL
 
@@ -220,14 +251,14 @@ class NotificationPublisher:
 
     def _base(self, sn: str | None = None):
         from google.protobuf import timestamp_pb2
-        from zqnt_utils.generated.zqnt import common_pb2
+        from zqnt_api.generated.zqnt import common_pb2
 
         ts = timestamp_pb2.Timestamp()
         ts.GetCurrentTime()
         return common_pb2.RequestBase(tid=str(uuid.uuid4()), sn=sn if sn is not None else self._sn, timestamp=ts)
 
     def _build_asset_status_request(self, event: AssetStatusEvent):
-        from zqnt_utils.generated.zqnt import events_pb2
+        from zqnt_api.generated.zqnt import events_pb2
 
         kwargs: dict = {"sn": event.sn, "online": event.online}
         if event.asset_id is not None:
@@ -243,7 +274,7 @@ class NotificationPublisher:
         )
 
     def _build_mission_event_request(self, event: MissionEvent):
-        from zqnt_utils.generated.zqnt import events_pb2
+        from zqnt_api.generated.zqnt import events_pb2
 
         kwargs: dict = {
             "mission_id": event.mission_id,
@@ -262,7 +293,7 @@ class NotificationPublisher:
 
     def _build_command_execution_event_request(self, event: CommandExecutionEvent):
         from google.protobuf import timestamp_pb2
-        from zqnt_utils.generated.zqnt import events_pb2
+        from zqnt_api.generated.zqnt import events_pb2
 
         # occurred_at is not optional on the wire, whatever this dataclass's default suggests:
         # CommandExecutionEventPublisher rejects the event outright without it, and because
