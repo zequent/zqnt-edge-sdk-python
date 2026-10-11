@@ -33,15 +33,17 @@ from importlib.metadata import version as _pkg_version
 try:
     __version__ = _pkg_version("edge-python-sdk")
 except PackageNotFoundError:
-    __version__ = "1.0.0"
+    __version__ = "3.0.0"
 
 from .adapter.base import EdgeAdapter
 from .adapter.commands import CATALOG as COMMAND_CATALOG
 from .adapter.commands import CommandSpec, RegisteredCommand, schema
 from .auth import EdgeAuthConfig, PlatformTokenVerifier, TokenVerificationError
 from .client.connector_client import ConnectorClient
+from .client.edge_gateway import EdgeGatewayClient
 from .client.live_data_service import LiveDataService
 from .client.mission_autonomy_client import MissionAutonomyClient
+from .client.telemetry_ingest import TelemetryIngestPublisher
 from .client.telemetry_publisher import TelemetryPublisher
 from .config import EdgeAdapterConfig, EdgeAdapterRuntime
 from .models import (
@@ -79,6 +81,9 @@ from .models import (
     CommandExecutionEvent,
     CommandExecutionStatus,
     CommandProgress,
+    CommandRisk,
+    CommandSafety,
+    CompletionMode,
     Coordinates,
     DetectionParameter,
     DetectionPosition,
@@ -121,9 +126,21 @@ from .models import (
     Waypoint,
     WaypointTaskConfig,
 )
+from .models.common import CustomCommandResponse, DetectionBatch, Payload, TelemetryField, TelemetryValueType
+from .models.live import Alert, AlertSeverity, TelemetrySample
 from .server.edge_server import EdgeServer, RegistrationConfig
 
 __all__ = [
+    "EdgeGatewayClient",
+    "TelemetryIngestPublisher",
+    "Payload",
+    "TelemetryField",
+    "DetectionBatch",
+    "CustomCommandResponse",
+    "TelemetryValueType",
+    "TelemetrySample",
+    "Alert",
+    "AlertSeverity",
     "__version__",
     # core
     "EdgeAdapter",
@@ -172,6 +189,9 @@ __all__ = [
     "schema",
     "Capability",
     "CapabilitySource",
+    "CommandRisk",
+    "CommandSafety",
+    "CompletionMode",
     "CapabilityState",
     "CapabilityTarget",
     "CapabilityTargetType",
